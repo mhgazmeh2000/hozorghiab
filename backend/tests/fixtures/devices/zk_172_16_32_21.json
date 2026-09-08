@@ -1,0 +1,46 @@
+{
+  "fixture_version": 1,
+  "captured_from": "physical device (pyzk 0.9)",
+  "captured_at": "2026-09",
+  "ip": "172.16.32.21",
+  "port": 4370,
+  "protocol": "zk_tcp",
+  "protocol_verified": true,
+  "network": {
+    "ip": "172.16.32.21",
+    "mask": "255.255.255.0",
+    "gateway": "172.16.32.1"
+  },
+  "firmware": "Ver 6.60 May 3 2016",
+  "serial_number": "2623320414184",
+  "platform": "ZLM60_TFT",
+  "device_name": "MB20",
+  "mac": "00:17:61:10:51:1f",
+  "vendor": "UNKNOWN",
+  "brand": null,
+  "open_ports": [23, 4360, 4370],
+  "verified_protocol_ports": {
+    "4370": "zk_tcp"
+  },
+  "discovered_ports_no_protocol": {
+    "23": null,
+    "4360": null
+  },
+  "capacities": {
+    "users": 90,
+    "user_capacity": 200,
+    "attendance": 38025,
+    "attendance_capacity": 50000,
+    "fingerprints": 108,
+    "fingerprint_capacity": 400,
+    "faces": 83,
+    "face_capacity": 200,
+    "cards": 4
+  },
+  "device_enabled": true,
+  "sensitive_fields": {
+    "communication_key": "REDACTED",
+    "password": "REDACTED"
+  },
+  "verification_notes": "Protocol verified on real hardware (MB20 / ZLM60 platform). Vendor left UNKNOWN per Task 9 (ZK protocol != ZKTeco brand)."
+}

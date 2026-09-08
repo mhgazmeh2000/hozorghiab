@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { apiClient, setToken } from "./api/client";
+import { apiClient, setToken, getToken } from "./api/client";
 import type { Me } from "./api/types";
 
 interface AuthState {
@@ -24,10 +24,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    // Don't even try /me if there's no token - avoids spurious 401s.
+    if (!getToken()) {
+      setMe(null);
+      setLoading(false);
+      return;
+    }
     try {
       const m = await apiClient.me();
       setMe(m);
     } catch {
+      // Clear the stale/invalid token silently.
+      setToken(null);
       setMe(null);
     } finally {
       setLoading(false);

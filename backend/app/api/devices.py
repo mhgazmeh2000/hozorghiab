@@ -69,8 +69,11 @@ async def _detail_out(db: AsyncSession, device: Device) -> DeviceDetailOut:
     out.capabilities = [
         {
             "capability": c.capability,
-            "supported": c.supported,
+            "implemented": c.implemented,
+            "supported": c.implemented,  # back-compat
             "verified": c.verified,
+            "enabled": c.enabled,
+            "is_destructive": c.is_destructive,
             "source": c.source,
             "reason": c.reason,
         }
@@ -322,7 +325,8 @@ async def refresh_device_info(
         info = await device_service.fetch_and_store_device_info(db, device)
     except Exception as exc:  # noqa: BLE001
         detail = str(exc).strip() or exc.__class__.__name__
-        device.status = "OFFLINE"
+        device.status = "PROBE_UNREACHABLE"
+        device.last_probe_error = detail[:500]
         device.last_error = detail[:2000]
         audit = Audit(db)
         await audit.record(
@@ -362,8 +366,11 @@ async def device_capabilities(
     return [
         {
             "capability": c.capability,
-            "supported": c.supported,
+            "implemented": c.implemented,
+            "supported": c.implemented,  # back-compat
             "verified": c.verified,
+            "enabled": c.enabled,
+            "is_destructive": c.is_destructive,
             "source": c.source,
             "reason": c.reason,
         }
@@ -560,6 +567,10 @@ async def sync_device(
     device = await _get_device(db, device_id)
     if body.direction not in ("device_to_server", "server_to_device", "bidirectional"):
         raise HTTPException(status_code=400, detail="invalid direction")
+    # server_to_device / bidirectional touch device state; require sync_users_to_device
+    # capability to be verified+enabled.
+    if body.direction in ("server_to_device", "bidirectional"):
+        await device_service.require_capability(db, device, "sync_users_to_device")
     job = await sync_service.create_sync_job(
         db, device.id, body.direction, body.scope, requested_by=user.username
     )
@@ -669,6 +680,8 @@ async def create_device_user(
         enabled=body.enabled,
         raw={"password": body.password or ""},
     )
+    # Guard: create_users capability must be verified+enabled (destructive).
+    await device_service.require_capability(db, device, "create_users")
     # write to device first
     try:
         adapter = await device_service.instantiate_adapter(db, device)
@@ -727,6 +740,7 @@ async def update_device_user(
     row = await db.get(DeviceUser, user_pk)
     if row is None or row.device_id != device.id:
         raise HTTPException(status_code=404, detail="user not found")
+    await device_service.require_capability(db, device, "update_users")
     from app.adapters.base import DeviceUserRecord
 
     rec = DeviceUserRecord(
@@ -781,7 +795,8 @@ async def delete_device_user(
     if row is None or row.device_id != device.id:
         raise HTTPException(status_code=404, detail="user not found")
     if not confirm:
-        raise HTTPException(status_code=400, detail="deletion requires confirm=true")
+        raise HTTPException(status_code=400, detail="deletion requires confirm=true (destructive)")
+    await device_service.require_capability(db, device, "delete_users")
     try:
         adapter = await device_service.instantiate_adapter(db, device)
         await adapter.delete_user(row.user_id_on_device)
@@ -790,7 +805,7 @@ async def delete_device_user(
     await db.delete(row)
     audit = Audit(db)
     await audit.record(
-        "user_delete", device_id=device.id, device_ip=device.ip_address,
+        "destructive_write", device_id=device.id, device_ip=device.ip_address,
         details={"user_id": row.user_id_on_device},
         actor={"username": user.username},
     )
@@ -899,8 +914,9 @@ async def clear_attendance(
     if not confirm:
         raise HTTPException(
             status_code=400,
-            detail="clearing device attendance logs requires confirm=true (destructive)",
+            detail="clearing device attendance logs requires confirm=true (destructive, irreversible)",
         )
+    await device_service.require_capability(db, device, "delete_logs")
     try:
         adapter = await device_service.instantiate_adapter(db, device)
         result = await adapter.clear_attendance_logs()
@@ -908,8 +924,9 @@ async def clear_attendance(
         raise HTTPException(status_code=502, detail=f"device rejected: {exc}") from exc
     audit = Audit(db)
     await audit.record(
-        "attendance_clear", device_id=device.id, device_ip=device.ip_address,
-        result="success", details=result, actor={"username": user.username},
+        "destructive_write", device_id=device.id, device_ip=device.ip_address,
+        result="success", details={"op": "clear_attendance", **result},
+        actor={"username": user.username},
     )
     await db.commit()
     return result

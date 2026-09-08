@@ -1,34 +1,77 @@
-# ZK Adapter
+# ZK TCP Adapter
 
-## Protocol
+The `zkteco` adapter implements the documented ZKTeco "Standalone series"
+TCP protocol on port 4370. Many OEM devices use the same protocol; the
+adapter labels them with `protocol=zk_tcp` and leaves `vendor=UNKNOWN`
+unless the device itself reports `~OEMVendor`.
 
-Adapter از ZK Standalone TCP protocol استفاده می‌کند و برای دستگاه‌های ZK/OEM روی TCP port `4370` طراحی شده است. تشخیص معتبر از handshake پروتکلی می‌آید، نه صرفاً بازبودن پورت.
+## Verified devices
 
-## Read operations
+| IP | Platform | FW | Status |
+|----|----------|----|--------|
+| 172.16.0.20 | ZMM220_TFT | Ver 6.60 Apr 27 2017 | protocol handshake, firmware, serial, platform, MAC, network, time, users, attendance VERIFIED |
+| 172.16.32.21 | ZLM60_TFT (MB20) | Ver 6.60 May 3 2016 | same operations VERIFIED |
 
-پیاده‌سازی فعلی read-only/operational این موارد را پوشش می‌دهد:
+Run `python test_real_devices.py` from the operator LAN to regenerate
+the report.
 
-- اتصال و تست session
-- firmware، serial، platform، device name، OEM vendor و MAC
-- device time
-- شمارنده کاربران، attendance، fingerprint و face از `GET_FREE_SIZES`
-- users و attendance records
-- fingerprint/face/card/password evidence در capability matrix
-- realtime registration stream در سطح adapter
+## Read operations (verified on both devices)
 
-اطلاعات خام دستگاه در `raw_device_info`/raw data نگهداری می‌شود و مقادیر نامشخص حدس زده نمی‌شوند.
+* connect (CMD_CONNECT / 1000)
+* get_firmware_version (CMD_GET_VERSION / 1100)
+* get_serialnumber (~SerialNumber OPTIONS_RRQ)
+* get_platform (~Platform)
+* get_device_name (~DeviceName)
+* get_mac (MAC)
+* get_network_params (IPAddress / NetMask / Gateway)
+* get_time (CMD_GET_TIME / 201)
+* get_fp_version (~ZKFPVersion)
+* get_face_version (~FaceFunOn)
+* get_pin_width (~PIN2Width)
+* get_users (DATA_WRRQ / dataset 01090005)
+* get_attendance_logs (CMD_ATTLOG_RRQ / dataset 010d0000)
+* get_free_sizes (CMD_GET_FREE_SIZES / 50) for capacities/counts
 
-## Synchronization
+## Write operations (implemented / NOT verified / disabled by default)
 
-Attendance ingestion idempotent است و برای هر device یک high-water cursor نگهداری می‌کند. fingerprint دیتابیس همچنان safety net است. در صورت نامعتبرشدن cursor، full sync دستی قابل اجراست.
+* create_user / update_user (CMD_USER_WRQ / 8)
+* delete_user (CMD_DELETE_USER / 18)
+* clear_attendance_logs (CMD_CLEAR_ATTLOG / 15)
+* set_time (CMD_SET_TIME / 202)
 
-## Capabilities
+These operations exist in the adapter per protocol spec but have NOT been
+tested against a real device as part of this release. They will not be
+exposed by the API unless:
 
-وجود یک method به‌تنهایی به معنی `VERIFIED` نیست. `supported` از قرارداد adapter و `verified` از پاسخ واقعی دستگاه تعیین می‌شود. عملیات write مانند delete user، clear logs و set time تا تست پذیرش واقعی `NOT_VERIFIED` باقی می‌مانند.
+1. The capability is explicitly `verified=true` on the device row (set
+   only after a successful manual verify by an admin).
+2. The operator sets `enabled=true` on that capability.
+3. The calling user has the `admin` role and passes `confirm=true`.
 
-## Known limitations
+## Biometrics
 
-- network parameter read/write برای همه firmwareها یکسان نیست و باید با پاسخ واقعی device تکمیل شود.
-- communication-key authentication باید قبل از پذیرش دستگاه key-protected به‌صورت جداگانه verify شود.
-- Generic/vendor adapters برای MVP جایگزین ZK verified نیستند.
-- اگر دستگاه در شبکه قابل دسترسی نباشد، refresh به‌جای تولید داده ساختگی، وضعیت خطا و transport detail برمی‌گرداند.
+Counts and capacities are reported (`fingerprint_count`, `face_count`,
+`card_count` and their capacities). Actual biometric template transfer
+(`read_templates` / `write_templates`) is intentionally not enabled —
+do NOT claim it is supported until it is implemented and tested.
+
+## Port 4360
+
+Discovery stores port 4360 as a discovered TCP port but does NOT assign
+any protocol to it without further evidence. Port 4370 is the only port
+on which ZK protocol is verified.
+
+## Incremental sync
+
+* The ZK adapter always pulls the full attendance dataset; the high-water
+  mark filter and deduplication happen at the service layer using
+  `(event_time, raw encoded time, user_id)` as the cursor.
+* Cursor is advanced only after a successful DB commit.
+* Idempotency: on re-sync, duplicate events are silently skipped via the
+  SHA-256 fingerprint unique constraint.
+
+## Compatibility note
+
+Some OEM firmwares reject `CMD_DATA_WRRQ` (1503); the adapter falls back
+to the legacy `CMD_DB_RRQ` (7) and surfaces a clear error if both fail
+(rather than fabricating data).

@@ -175,17 +175,33 @@ class ZKTecoAdapter(AttendanceAdapter):
                 "~IsOnlyRFMachine",
             ]
         )
+        # IMPORTANT: ZK TCP protocol ≠ ZKTeco brand. Many OEM boards use this
+        # protocol. We leave vendor/brand as UNKNOWN unless the device itself
+        # reports an OEM vendor via ~OEMVendor. Do NOT guess.
+        vendor = (opts.get("~OEMVendor") or "").strip() or None
+        brand = None
+        model = opts.get("~DeviceName")
+        if vendor:
+            v = vendor.lower()
+            if v in ("zkteco", "zksoftware", "zk-teco"):
+                brand = "ZKTeco"
+            else:
+                # OEM brand explicitly reported by the device (still ZK-protocol)
+                brand = vendor
+        # If platform strings strongly hint ZKTeco ("ZMM" is ZKTeco's platform
+        # prefix) we still do NOT claim brand=ZKTeco because many clones use
+        # those platforms. Protocol is verified, brand stays UNKNOWN.
         info = DeviceInfo(
             platform=opts.get("~Platform"),
             serial_number=opts.get("~SerialNumber"),
             device_name=opts.get("~DeviceName"),
-            vendor=opts.get("~OEMVendor"),
+            vendor=vendor if vendor else None,
             mac_address=opts.get("MAC"),
             firmware_version=None,
-            brand="ZKTeco",
-            model=opts.get("~DeviceName"),
+            brand=brand,  # None (UNKNOWN) unless OEMVendor reports it
+            model=model,
             raw=opts,
-            source="device (ZK OPTIONS_RRQ)",
+            source="device (ZK OPTIONS_RRQ) - protocol verified; vendor UNKNOWN unless OEMVendor set",
         )
         # firmware: CMD_GET_VERSION
         try:
@@ -201,16 +217,16 @@ class ZKTecoAdapter(AttendanceAdapter):
         try:
             sizes = await c.get_free_sizes()
             info.user_count = sizes.get("user_count")
+            info.user_capacity = sizes.get("user_capacity")
             info.fingerprint_count = sizes.get("fingerprint_count")
+            info.fingerprint_capacity = sizes.get("fingerprint_capacity")
             info.face_count = sizes.get("face_count")
+            info.face_capacity = sizes.get("face_capacity")
             info.attendance_count = sizes.get("attendance_count")
+            info.attendance_capacity = sizes.get("attendance_capacity")
             info.raw["free_sizes"] = sizes
         except (DeviceProtocolError, DeviceConnectionError):
             pass
-        # OEM vendors are still ZK-protocol devices; only label after evidence
-        vendor = (info.vendor or "").strip().lower()
-        if vendor and vendor not in ("zkteco", "zksoftware"):
-            info.brand = info.vendor  # OEM brand reported by the device itself
         return info
 
     async def get_users(self, **kwargs) -> list[DeviceUserRecord]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -16,6 +16,16 @@ class ORMModel(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def _trim_username(cls, v: str) -> str:
+        return v.strip().lower() if isinstance(v, str) else v
+
+    @field_validator("password")
+    @classmethod
+    def _trim_password(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
 
 
 class TokenResponse(BaseModel):
@@ -275,14 +285,20 @@ class DashboardStats(BaseModel):
     online_devices: int = 0
     offline_devices: int = 0
     unknown_devices: int = 0
+    probe_unreachable_devices: int = 0
+    last_known_online_devices: int = 0
+    execution_environment_unreachable: int = 0
     verified_devices: int = 0
     attendance_candidates: int = 0
     total_users: int = 0
     today_attendance: int = 0
     last_sync_at: Optional[datetime] = None
+    last_sync_status: Optional[str] = None
+    server_time: Optional[datetime] = None
     failed_operations_24h: int = 0
     networks_count: int = 0
     pending_jobs: int = 0
+    storage_alerts: list[dict] = []
 
 
 class SyncRequest(BaseModel):

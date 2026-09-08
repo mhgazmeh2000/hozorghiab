@@ -1,0 +1,46 @@
+{
+  "fixture_version": 1,
+  "captured_from": "physical device (pyzk 0.9)",
+  "captured_at": "2026-09",
+  "ip": "172.16.0.20",
+  "port": 4370,
+  "protocol": "zk_tcp",
+  "protocol_verified": true,
+  "network": {
+    "ip": "172.16.0.20",
+    "mask": "255.255.255.0",
+    "gateway": "172.16.0.1"
+  },
+  "firmware": "Ver 6.60 Apr 27 2017",
+  "serial_number": "ADWC175060007",
+  "platform": "ZMM220_TFT",
+  "device_name": null,
+  "mac": "00:17:61:12:c9:b4",
+  "vendor": "UNKNOWN",
+  "brand": null,
+  "open_ports": [23, 4360, 4370],
+  "verified_protocol_ports": {
+    "4370": "zk_tcp"
+  },
+  "discovered_ports_no_protocol": {
+    "23": null,
+    "4360": null
+  },
+  "capacities": {
+    "users": 167,
+    "user_capacity": 2000,
+    "attendance": 12799,
+    "attendance_capacity": 80000,
+    "fingerprints": 168,
+    "fingerprint_capacity": 2000,
+    "faces": 160,
+    "face_capacity": 1500,
+    "cards": 9
+  },
+  "device_enabled": true,
+  "sensitive_fields": {
+    "communication_key": "REDACTED",
+    "password": "REDACTED"
+  },
+  "verification_notes": "Protocol verified on real hardware. Vendor left UNKNOWN because OEMVendor option was not read in the original capture; re-run the real device test to populate."
+}

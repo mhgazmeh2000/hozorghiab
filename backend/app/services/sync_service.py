@@ -25,11 +25,12 @@ from app.services.device_service import (
     read_and_store_users,
     run_adapter_op,
 )
-from app.services.job_runner import submit
+from app.services import job_runner
 
 
 def start_sync_job(job_id: str) -> None:
-    submit(job_id, lambda: execute_sync_job(job_id))
+    """Dispatch a sync job via the configured runner (builtin or celery)."""
+    job_runner.submit_sync_job(job_id)
 
 
 async def create_sync_job(

@@ -31,7 +31,7 @@ async def test_discover_zk_host(mock_zk):
     assert port in report["open_ports"]
     zk = report["zk"]
     assert zk and zk["verified"] is True
-    assert report["verdict"]["state"] == "DETECTED"
+    assert report["verdict"]["state"] == "PROTOCOL_VERIFIED"
     assert "zkteco" in report["adapter_candidates"]
     info = report["device_info"]
     assert info["serial_number"] == "ZK-MOCK-0001"
@@ -45,9 +45,9 @@ async def test_discover_http_host(mock_http):
     http = report["http"]
     assert http and http[0]["status_code"] == 200
     assert http[0]["title"] == "ZKTime"
-    assert report["verdict"]["state"] in ("POSSIBLE", "UNKNOWN")
-    # HTTP alone must never produce a VERIFIED verdict
-    assert report["verdict"]["state"] != "DETECTED"
+    assert report["verdict"]["state"] in ("PORT_OPEN", "UNKNOWN")
+    # HTTP alone must never produce a PROTOCOL_VERIFIED verdict
+    assert report["verdict"]["state"] != "PROTOCOL_VERIFIED"
 
 
 async def test_discover_unreachable_host():

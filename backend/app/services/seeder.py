@@ -73,25 +73,53 @@ async def run_seeder(db: AsyncSession, force: bool = False) -> None:
     if missing_networks:
         logger.info("seeded %d missing default scan networks", len(missing_networks))
 
-    # 3) credential encryption key (single-node persistence)
+    # 3) credential encryption key (single-node dev persistence only).
+    # Production MUST supply CREDENTIAL_ENCRYPTION_KEY via env (validated
+    # in config.py at startup); we never auto-generate + persist a prod key.
+    if settings.is_production and not settings.credential_encryption_key:
+        # Should have been caught by config.validate_startup(); guard here too.
+        raise RuntimeError(
+            "Production requires CREDENTIAL_ENCRYPTION_KEY to be set."
+        )
+
     key_row = await db.scalar(
         select(SystemSetting).where(
             SystemSetting.key == "_credential_encryption_key"
         )
     )
-    if key_row is None and not settings.credential_encryption_key:
-        key = generate_key()
-        key_row = SystemSetting(
-            key="_credential_encryption_key", value=key,
-            description="Auto-generated Fernet key for credential encryption",
-        )
-        db.add(key_row)
-    await db.commit()
-    if key_row is not None and key_row.value:
-        configure_key_provider(lambda v: None)  # already persisted
+    if settings.credential_encryption_key:
+        # Env-supplied key always wins; do not overwrite from DB.
+        from app.core import crypto as _c
+        _c._key = settings.credential_encryption_key.encode("utf-8")  # noqa: SLF001
+        # If a stale DB key exists but env overrides it, leave the DB row alone
+        # (it may belong to a previous environment); do not overwrite.
+    elif key_row is not None and key_row.value:
+        # Dev: reuse previously persisted key so restarts keep working.
+        from app.core import crypto as _c
+        _c._key = key_row.value.encode("utf-8")  # noqa: SLF001
+        logger.info("loaded persisted dev encryption key from system_settings")
+    else:
+        # Dev first-boot: generate, persist, and register a no-op provider
+        # (the DB write below serves as persistence).
         from app.core import crypto as _c
 
-        _c._key = key_row.value.encode("utf-8")  # noqa: SLF001
+        new_key = generate_key()
+        key_row = SystemSetting(
+            key="_credential_encryption_key",
+            value=new_key,
+            description="Auto-generated DEV-only Fernet key for credential encryption. "
+                        "Set CREDENTIAL_ENCRYPTION_KEY in production.",
+        )
+        db.add(key_row)
+        _c._key = new_key.encode("utf-8")  # noqa: SLF001
+        logger.warning(
+            "Generated a NEW dev encryption key and stored it in "
+            "system_settings. Previously stored credentials (if any) will be "
+            "unreadable."
+        )
+
+    configure_key_provider(lambda v: None)
+    await db.commit()
 
 
 async def bootstrap_credentials_check(db: AsyncSession) -> None:
