@@ -1,18 +1,28 @@
 """Credential encryption using Fernet (AES-128-CBC + HMAC-SHA256).
 
-When no CREDENTIAL_ENCRYPTION_KEY is configured the server generates one on
-first boot and persists it in system_settings (key: _credential_encryption_key)
-so restarts keep working on a single node. Multi-instance/production setups
-should set CREDENTIAL_ENCRYPTION_KEY explicitly in the environment.
+Security model
+--------------
+* Production (ENVIRONMENT=production): CREDENTIAL_ENCRYPTION_KEY MUST be
+  supplied via the environment. The server refuses to start otherwise. We
+  never silently generate a key and persist it in the DB in production
+  (that would break redeploys / replicas and is a security smell).
+* Development (ENVIRONMENT=development): if CREDENTIAL_ENCRYPTION_KEY is
+  not set, we auto-generate one on first boot and persist it in
+  system_settings (key: _credential_encryption_key) so restarts keep working
+  on a single node. A warning is logged.
 """
 from __future__ import annotations
+
+import logging
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 _key: bytes | None = None
-_persisted_provider = None  # callable -> persist a newly generated key (set at boot)
+_persisted_provider = None  # callable to persist a newly generated dev key
 
 
 def configure_key_provider(persist: callable) -> None:
@@ -25,15 +35,26 @@ def _load_or_create_key() -> bytes:
     if _key is not None:
         return _key
     if settings.credential_encryption_key:
-        key = settings.credential_encryption_key.encode("utf-8")
-    else:
-        key = Fernet.generate_key()
-        if _persisted_provider:
-            try:
-                _persisted_provider(key.decode("utf-8"))
-            except Exception:
-                pass  # survive if persistence fails; key lives for this process
-    _key = key
+        _key = settings.credential_encryption_key.encode("utf-8")
+        return _key
+    if settings.is_production:
+        raise RuntimeError(
+            "CREDENTIAL_ENCRYPTION_KEY is required in production. "
+            "Generate one with: "
+            "`from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())`"
+        )
+    # DEV-ONLY auto-generation + DB persistence.
+    logger.warning(
+        "CREDENTIAL_ENCRYPTION_KEY not set; generating an ephemeral "
+        "development key and persisting it in system_settings. Set "
+        "CREDENTIAL_ENCRYPTION_KEY explicitly for stable behavior."
+    )
+    _key = Fernet.generate_key()
+    if _persisted_provider:
+        try:
+            _persisted_provider(_key.decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to persist auto-generated dev encryption key")
     return _key
 
 

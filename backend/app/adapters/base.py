@@ -51,9 +51,15 @@ class DeviceInfo:
     mac_address: Optional[str] = None
     device_time: Optional[datetime] = None
     user_count: Optional[int] = None
+    user_capacity: Optional[int] = None
     fingerprint_count: Optional[int] = None
+    fingerprint_capacity: Optional[int] = None
     face_count: Optional[int] = None
+    face_capacity: Optional[int] = None
+    card_count: Optional[int] = None
+    card_capacity: Optional[int] = None
     attendance_count: Optional[int] = None
+    attendance_capacity: Optional[int] = None
     raw: dict = field(default_factory=dict)
     source: str = "device"
 

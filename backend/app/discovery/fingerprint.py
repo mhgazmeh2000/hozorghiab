@@ -1,21 +1,21 @@
 """Stage 4: fingerprinting / state assignment.
 
-Honesty rules:
-- ``VERIFIED`` requires a successful *protocol* interaction with the device
-  (today: the ZK CMD_CONNECT handshake, because that is the only attendance
-  protocol implemented against authoritative documentation in this build).
-- ``DETECTED`` requires strong but non-protocol evidence (e.g. confirmed
-  open attendance port).
-- ``POSSIBLE`` = partial evidence (an HTTP service, banners...).
-- ``UNKNOWN`` = reachable, nothing conclusive.
-- Everything else stays in those buckets - never invented.
+Stages (honest, never fabricated):
 
-The knowledge base of *attendance-vendor fingerprint strings* is deliberately
-empty until each string can be verified against a real device (see
-ADAPTERS.md).  This prevents the system from "recognising" vendors it cannot
-actually prove.
+- UNKNOWN            - no evidence
+- PING_REACHED       - ICMP answered, no TCP
+- PORT_OPEN          - TCP connect succeeded, protocol unknown
+- PROTOCOL_CANDIDATE - open port matches known attendance protocol (e.g. 4370)
+- PROTOCOL_VERIFIED  - protocol handshake succeeded
+- DEVICE_VERIFIED    - full device info read / operator acceptance
+
+Task 24: Do not infer vendor from a port. TCP 4370 open -> ZK candidate;
+successful ZK protocol communication -> ZK PROTOCOL_VERIFIED; vendor may
+still be UNKNOWN.
 """
 from __future__ import annotations
+
+from typing import Optional
 
 from app.models.enums import DetectionState
 
@@ -26,33 +26,32 @@ def fingerprint_open_port_state(open_ports: list[int]) -> dict:
     hit = attendance_ports & set(open_ports)
     if hit:
         ports = sorted(hit)
-        # Attendance TCP ports are strong evidence, but only a handshake
-        # upgrades to VERIFIED/DETECTED protocol identity.
         return {
-            "state": DetectionState.POSSIBLE.value,
+            "state": DetectionState.PROTOCOL_CANDIDATE.value,
             "confidence": 0.5,
-            "source": f"open attendance port(s) {ports}",
+            "source": f"open attendance port(s) {ports} - protocol not yet verified",
             "candidate": True,
             "attendance_ports": ports,
+        }
+    if open_ports:
+        return {
+            "state": DetectionState.PORT_OPEN.value,
+            "confidence": 0.2,
+            "source": f"open ports {sorted(open_ports)} but none match known attendance protocols",
+            "candidate": False,
+            "attendance_ports": [],
         }
     return {
         "state": DetectionState.UNKNOWN.value,
         "confidence": 0.0,
-        "source": "no attendance port evidence",
+        "source": "no open ports / no evidence",
         "candidate": False,
         "attendance_ports": [],
     }
 
 
 def fingerprint_evidence(evidence: dict) -> dict:
-    """Combine all evidence into a detection verdict.
-
-    ``evidence``:
-        open_ports: [int]
-        services:   {port: probe_result dict}
-        zk:         {verified: bool, confidence, evidence}
-        http:       list of {title, server, headers}
-    """
+    """Combine all evidence into a detection verdict."""
     open_ports = evidence.get("open_ports") or []
     verdict = fingerprint_open_port_state(open_ports)
     state = verdict["state"]
@@ -61,12 +60,18 @@ def fingerprint_evidence(evidence: dict) -> dict:
     candidate = verdict["candidate"]
     attendance_ports = verdict["attendance_ports"]
 
+    # ICMP
+    if evidence.get("icmp_reachable"):
+        sources.append("ICMP ping replied")
+        if state == DetectionState.UNKNOWN.value:
+            state = DetectionState.PING_REACHED.value
+            confidence = max(confidence, 0.1)
+
     zk = evidence.get("zk")
     if zk and zk.get("verified"):
-        # ZK handshake succeeded: protocol identity is established.
-        state = DetectionState.DETECTED.value
+        state = DetectionState.PROTOCOL_VERIFIED.value
         confidence = max(confidence, 0.95)
-        sources.append("ZK CMD_CONNECT handshake (protocol verified)")
+        sources.append("ZK CMD_CONNECT handshake (protocol verified on port 4370)")
         candidate = True
         if zk.get("attendance_ports"):
             attendance_ports = zk["attendance_ports"]
@@ -79,7 +84,7 @@ def fingerprint_evidence(evidence: dict) -> dict:
                 f"server={h.get('server') or '-'} title={h.get('title') or '-'}"
             )
             if state == DetectionState.UNKNOWN.value:
-                state = DetectionState.POSSIBLE.value
+                state = DetectionState.PORT_OPEN.value
                 confidence = max(confidence, 0.4)
 
     if evidence.get("snmp"):
@@ -95,10 +100,20 @@ def fingerprint_evidence(evidence: dict) -> dict:
     }
 
 
+# Back-compat: older code/tests may reference POSSIBLE/DETECTED/VERIFIED as
+# verdicts. Map them to the new states.
+def _back_compat_state(state: str) -> str:
+    return {
+        "POSSIBLE": DetectionState.PORT_OPEN.value,
+        "DETECTED": DetectionState.PROTOCOL_CANDIDATE.value,
+        "VERIFIED": DetectionState.PROTOCOL_VERIFIED.value,
+    }.get(state, state)
+
+
 def http_vendor_hint(title: Optional[str], server: Optional[str]) -> dict:
     """Best-effort vendor hint from HTTP evidence.
 
-    Returns empty dict unless a pattern is *known*.  Currently no pattern has
+    Returns empty dict unless a pattern is *known*. Currently no pattern has
     been verified against real attendance hardware, so this stays empty.
     """
     return {}

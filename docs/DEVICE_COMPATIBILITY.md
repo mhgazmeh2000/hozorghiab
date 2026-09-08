@@ -1,46 +1,53 @@
 # Device Compatibility
 
-این سند وضعیت پذیرش read-only دستگاه‌های واقعی ارائه‌شده برای نسخه اول را ثبت می‌کند. مقادیر زیر بر اساس گزارش تست واقعی با `pyzk 0.9` هستند و از داده ساختگی تولید نشده‌اند.
+This page lists every adapter that exists in the repository and classifies
+each honestly. **Nothing is marked VERIFIED without a real-device test on
+physical hardware.**
 
-## 172.16.0.20
+## Legend
 
-| مورد | وضعیت | مقدار مشاهده‌شده |
-|---|---|---|
-| ZK TCP / port 4370 | VERIFIED | ZK TCP |
-| Firmware | VERIFIED | Ver 6.60 Apr 27 2017 |
-| Serial | VERIFIED | ADWC175060007 |
-| Platform | VERIFIED | ZMM220_TFT |
-| MAC | VERIFIED | 00:17:61:12:c9:b4 |
-| Device time | VERIFIED | قابل دریافت |
-| Users | VERIFIED | 167 / 2000 |
-| Attendance | VERIFIED | 12799 / 80000, free 67201 |
-| Fingerprints | VERIFIED | 168 / 2000 |
-| Faces | VERIFIED | 160 / 1500 |
-| Cards | VERIFIED | 9 |
-| Write operations | NOT_VERIFIED | نیازمند تست جداگانه و confirmation |
+* **VERIFIED**        – read operations confirmed against a physical device.
+* **IMPLEMENTED**     – code exists per spec / SDK; not tested live.
+* **GENERIC**         – best-effort generic probe (HTTP title / banner).
+* **PLACEHOLDER**     – skeleton only; do not expect any real functionality.
+* **NOT SUPPORTED**   – protocol is known to not support a feature.
 
-Gateway `172.16.0.1` و subnet `255.255.255.0` طبق مشخصات ارائه‌شده هستند؛ تا زمانی که از خود دستگاه در runtime خوانده نشوند، source آن‌ها `USER_PROVIDED` محسوب می‌شود.
+## Adapters
 
-## 172.16.32.21
+| Adapter | Status | Notes |
+|---------|--------|-------|
+| `zkteco` (ZK TCP, port 4370) | **VERIFIED** on ZMM220_TFT, ZLM60_TFT (MB20) | Read ops verified; writes IMPLEMENTED but NOT verified and disabled by default. Vendor left UNKNOWN unless OEMVendor reports it. |
+| `generic_http` | GENERIC | Probes HTTP/HTTPS endpoints and captures title/headers for fingerprinting; does not pretend to pull attendance. |
+| `generic_snmp` | PLACEHOLDER | SNMP community probe only; no vendor-specific MIBs implemented. |
+| `anviz` | PLACEHOLDER | Skeleton adapter; not tested against real Anviz hardware. |
+| `dahua` | PLACEHOLDER | Skeleton adapter; no live verification. |
+| `hikvision` | PLACEHOLDER | Skeleton adapter; no live verification. |
+| `nitgen` | PLACEHOLDER | Skeleton adapter. |
+| `suprema` | PLACEHOLDER | Skeleton adapter. |
+| `virdi` | PLACEHOLDER | Skeleton adapter. |
 
-| مورد | وضعیت | مقدار مشاهده‌شده |
-|---|---|---|
-| ZK TCP / port 4370 | VERIFIED | ZK TCP |
-| Firmware | VERIFIED | Ver 6.60 May 3 2016 |
-| Serial | VERIFIED | 2623320414184 |
-| Platform | VERIFIED | ZLM60_TFT |
-| Device name | VERIFIED | MB20 |
-| MAC | VERIFIED | 00:17:61:10:51:1f |
-| Device time | VERIFIED | قابل دریافت |
-| Users | VERIFIED | 90 / 200 |
-| Attendance | VERIFIED | 38025 / 50000, free 11975 |
-| Fingerprints | VERIFIED | 108 / 400 |
-| Faces | VERIFIED | 83 / 200 |
-| Cards | VERIFIED | 4 |
-| Write operations | NOT_VERIFIED | نیازمند تست جداگانه و confirmation |
+## Verified ZK operations
 
-Gateway `172.16.32.1` و subnet `255.255.255.0` طبق مشخصات ارائه‌شده هستند؛ تا زمانی که از خود دستگاه در runtime خوانده نشوند، source آن‌ها `USER_PROVIDED` محسوب می‌شود.
+See [ZK_ADAPTER.md](ZK_ADAPTER.md) for the full list of verified operations
+on both real devices.
 
-## وضعیت فعلی محیط
+## Discovery behaviour
 
-این دو IP باید با adapter `zkteco` و port `4370` ثبت شوند. اگر دستگاه از محیط اجرا reachable نباشد، سیستم باید `OFFLINE`/`ERROR` و پیام transport را نشان دهد؛ اطلاعات بالا نباید به‌صورت خودکار جایگزین پاسخ runtime شوند.
+* Ping / TCP open alone never marks a device as VERIFIED.
+* `TCP 4370 open` → protocol candidate.
+* Successful ZK CMD_CONNECT handshake → `protocol=zk_tcp, PROTOCOL_VERIFIED`.
+* Successful `get_device_info` (firmware, serial, platform) → device row
+  becomes `DEVICE_VERIFIED`.
+* Other open ports (23, 4360, 5005, 8080, ...) are recorded as discovered
+  ports with `protocol_state=UNKNOWN` unless a specific probe confirms a
+  protocol.
+
+## Adding a new verified device
+
+1. Connect it to the test network.
+2. Add the IP to `scripts/test_real_devices.py` or run the device through
+   the UI discovery.
+3. Run `python test_real_devices.py --out report.json`.
+4. Save a sanitized golden fixture to `tests/fixtures/devices/<name>.json`
+   (no passwords, no biometric templates, no comm keys).
+5. Update this document with the new VERIFIED device/platform/firmware.

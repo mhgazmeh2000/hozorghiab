@@ -10,7 +10,9 @@ from app.models.device import (  # noqa: F401
     DeviceRawData,
 )
 from app.models.enums import (  # noqa: F401
+    CapabilityState,
     CredentialKind,
+    CredentialVerificationState,
     DetectionState,
     DeviceStatus,
     DiscoveryStage,

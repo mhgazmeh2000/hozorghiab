@@ -20,7 +20,7 @@ os.environ.setdefault("ENABLE_SCHEDULER", "false")
 os.environ.setdefault("BOOTSTRAP_ADMIN_PASSWORD", "Admin-Test-1234!")
 os.environ.setdefault("BOOTSTRAP_OPERATOR_PASSWORD", "Operator-Test-1234!")
 os.environ.setdefault("BOOTSTRAP_VIEWER_PASSWORD", "Viewer-Test-1234!")
-os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "placeholder")
+os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "2Kxa7QZ9t8bF3mP0sRyW4vN6cL1dJ5gH-eK8rT2yUoA=")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

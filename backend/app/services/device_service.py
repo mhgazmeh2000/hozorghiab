@@ -114,7 +114,15 @@ class DeviceConnectionErrorUnknown(Exception):
 
 
 async def test_device(db: AsyncSession, device: Device) -> dict:
-    """Connection test that updates online state."""
+    """Connection test that updates probe/liveness state.
+
+    We distinguish network reachability from protocol verification:
+    - a successful TCP+protocol session -> ONLINE_PROTOCOL_VERIFIED
+    - failure in this environment                  -> PROBE_UNREACHABLE
+      (does NOT prove the device is truly offline; just that the current
+      execution environment cannot reach it.)
+    """
+    from app.models.enums import DeviceStatus
     try:
         adapter = await instantiate_adapter(db, device)
         result = await adapter.test_connection()
@@ -122,14 +130,28 @@ async def test_device(db: AsyncSession, device: Device) -> dict:
         result = {"ok": False, "detail": str(exc)[:500]}
     ok = bool(result.get("ok"))
     now = utcnow()
+    device.last_probe_at = now
     device.last_seen_at = now
     if ok:
-        device.status = DeviceStatus.VERIFIED.value if device.verified_at else DeviceStatus.ONLINE.value
+        # Do not escalate all the way to VERIFIED automatically; VERIFIED is
+        # reserved for explicit operator acknowledgement (fetch_and_store_device_info
+        # will set it after a full successful info read).
+        if device.verified_at:
+            device.status = DeviceStatus.VERIFIED.value
+        else:
+            device.status = DeviceStatus.ONLINE_PROTOCOL_VERIFIED.value
         device.last_online_at = now
         device.last_error = None
+        device.last_probe_error = None
     else:
-        device.status = DeviceStatus.OFFLINE.value
-        device.last_offline_at = now
+        # Preserve last-known state; record probe failure separately so the
+        # UI can show "last known online / current probe unreachable".
+        if device.status in (DeviceStatus.VERIFIED.value, DeviceStatus.ONLINE_PROTOCOL_VERIFIED.value):
+            device.status = DeviceStatus.OFFLINE_VERIFIED.value
+            device.last_offline_at = now
+        else:
+            device.status = DeviceStatus.PROBE_UNREACHABLE.value
+        device.last_probe_error = str(result.get("detail"))[:500]
     await db.commit()
     return result
 
@@ -143,38 +165,80 @@ async def fetch_and_store_device_info(db: AsyncSession, device: Device) -> dict:
         db, device, "get_device_info", _run, capability="device_info"
     )
     now = utcnow()
-    device.brand = info.brand or device.brand
+    # Only overwrite fields when the device actually reported them.
+    # Vendor stays UNKNOWN unless OEMVendor explicitly reports it (Task 9).
+    device.brand = info.brand if info.brand else device.brand
     device.model = info.model or device.model
     device.serial_number = info.serial_number or device.serial_number
     device.firmware_version = info.firmware_version or device.firmware_version
     device.platform = info.platform or device.platform
     device.device_name = info.device_name or device.device_name
-    device.vendor = info.vendor or device.vendor
+    if info.vendor is not None:
+        device.vendor = info.vendor
     device.device_id = info.device_id or device.device_id
     device.mac_address = info.mac_address or device.mac_address
+
+    # Device time tracking (Task 23)
     if info.device_time is not None:
+        import datetime as dt
+        server_now = dt.datetime.now(dt.timezone.utc)
+        device_time_utc = info.device_time
+        if device_time_utc.tzinfo is None:
+            # ZK devices report local clock without tz; treat as naive UTC
+            # unless timezone configured in extra_config.
+            import os
+            # We record the raw offset in seconds from the server clock.
+            try:
+                offset = int((server_now.replace(tzinfo=None) - device_time_utc).total_seconds())
+            except Exception:
+                offset = None
+            device.device_time_offset_s = offset
+        else:
+            device.device_time_offset_s = int((server_now - device_time_utc).total_seconds())
+        device.device_time_checked_at = now
         extra_config = dict(device.extra_config or {})
         extra_config["device_time"] = info.device_time.isoformat()
         device.extra_config = extra_config
+
     device.verified_at = now
     device.status = DeviceStatus.VERIFIED.value
-    device.detection_state = "VERIFIED"
+    device.detection_state = "DEVICE_VERIFIED"
     device.confidence = max(device.confidence or 0, 0.99)
+
+    # Storage / capacity metrics (Task 22)
+    sizes = (info.raw or {}).get("free_sizes") or {}
+    extra_config = dict(device.extra_config or {})
+    counts = extra_config.get("counts", {})
     if info.user_count is not None:
-        sizes = (info.raw or {}).get("free_sizes") or {}
-        extra_config = dict(device.extra_config or {})
-        extra_config["counts"] = {
-            "user_count": info.user_count,
-            "user_capacity": sizes.get("user_capacity"),
-            "fingerprint_count": info.fingerprint_count,
-            "fingerprint_capacity": sizes.get("fingerprint_capacity"),
-            "face_count": info.face_count,
-            "face_capacity": sizes.get("face_capacity"),
-            "attendance_count": info.attendance_count,
-            "attendance_capacity": sizes.get("attendance_capacity"),
-            "attendance_free": sizes.get("remaining_attendance"),
-        }
-        device.extra_config = extra_config
+        counts["user_count"] = info.user_count
+    if info.user_capacity is not None:
+        counts["user_capacity"] = info.user_capacity
+        device.storage_capacity = info.user_capacity  # user capacity (informational)
+    if info.fingerprint_count is not None:
+        counts["fingerprint_count"] = info.fingerprint_count
+    if info.fingerprint_capacity is not None:
+        counts["fingerprint_capacity"] = info.fingerprint_capacity
+    if info.face_count is not None:
+        counts["face_count"] = info.face_count
+    if info.face_capacity is not None:
+        counts["face_capacity"] = info.face_capacity
+    if info.card_count is not None:
+        counts["card_count"] = info.card_count
+    if info.card_capacity is not None:
+        counts["card_capacity"] = info.card_capacity
+    if info.attendance_count is not None:
+        counts["attendance_count"] = info.attendance_count
+        device.storage_used = info.attendance_count
+    if info.attendance_capacity is not None:
+        counts["attendance_capacity"] = info.attendance_capacity
+        device.storage_capacity = info.attendance_capacity
+        if info.attendance_count is not None and info.attendance_capacity:
+            pct = round((info.attendance_count / max(info.attendance_capacity, 1)) * 100.0, 2)
+            counts["attendance_used_pct"] = pct
+            device.storage_usage_pct = pct
+    counts["attendance_free"] = sizes.get("remaining_attendance")
+    extra_config["counts"] = counts
+    device.extra_config = extra_config
     await db.commit()
     return info.__dict__
 
@@ -234,3 +298,46 @@ async def set_user_sync_fields(
         for k, v in fields.items():
             setattr(row, k, v)
         await db.commit()
+
+
+async def require_capability(
+    db: AsyncSession, device: Device, capability: str, *, destructive_only_admin: bool = True
+):
+    """Check that a capability is verified+enabled on the device.
+
+    Raises HTTPException 409 if the capability is not yet verified/enabled.
+    Destructive capabilities additionally require admin role (enforced at the
+    endpoint level via require_roles("admin") alongside this check).
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models import DeviceCapability
+
+    row = await db.scalar(
+        select(DeviceCapability).where(
+            DeviceCapability.device_id == device.id,
+            DeviceCapability.capability == capability,
+        )
+    )
+    if row is None or not row.implemented:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Capability '{capability}' is not implemented for this device.",
+        )
+    if not row.verified:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Capability '{capability}' is implemented but has NOT been verified "
+                "against the real device. Run 'Refresh Info' / test connection first; "
+                "destructive operations also require explicit admin verification."
+            ),
+        )
+    if not row.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Capability '{capability}' is verified but DISABLED. "
+                "An admin must explicitly enable it before execution."
+            ),
+        )

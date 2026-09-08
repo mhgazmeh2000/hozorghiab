@@ -13,19 +13,41 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
 
 # Node / frontend build output
 node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 .vite/
+.next/
+.parcel-cache/
+.npm/
+
+# Uploaded user data / runtime artifacts
+backend/data/imports/
+backend/data/exports/
+*.log
+*.log.err
 
 # Editor and OS files
 .vscode/
 .idea/
 *.swp
+*.swo
 Thumbs.db
 Desktop.ini
+.DS_Store
 
-# Generated reports and local runtime output
-reports/*.csv
-*.log
+# Sandbox / preview tooling (Arena / freebuff)
+.freebuff/
+
+# Alembic (only versions are tracked; other runtime generated files ignored)
+# -
+backend/.env

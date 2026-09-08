@@ -76,9 +76,17 @@ class Device(Base, UUIDPkMixin, TimestampMixin):
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_online_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_offline_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_probe_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_probe_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_sync_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # device time / storage usage
+    device_time_offset_s: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    device_time_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    storage_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    storage_capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    storage_usage_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # operational settings (configurable per device)
     connect_timeout_s: Mapped[float] = mapped_column(Float, default=3.0)
@@ -105,11 +113,36 @@ class Device(Base, UUIDPkMixin, TimestampMixin):
 
     @property
     def capability_map(self) -> dict:
-        return {c.capability: c.supported for c in self.capabilities}
+        """Back-compat: True when implemented AND verified AND enabled."""
+        return {
+            c.capability: (c.implemented and c.verified and c.enabled)
+            for c in self.capabilities
+        }
+
+    @property
+    def capability_states(self) -> dict:
+        return {
+            c.capability: {
+                "implemented": c.implemented,
+                "verified": c.verified,
+                "enabled": c.enabled,
+                "is_destructive": c.is_destructive,
+            }
+            for c in self.capabilities
+        }
 
 
 class DeviceCapability(Base, UUIDPkMixin, TimestampMixin):
-    """Capability matrix entry for a device (evidence-derived)."""
+    """Capability matrix entry for a device (evidence-derived).
+
+    State model:
+      implemented - code can speak this command per spec
+      verified    - we have successfully executed it against the real device
+      enabled     - operator allows it to be offered in the UI / scheduled
+                    Destructive operations (delete_user, clear_attendance,
+                    restart, set_time, ...) are enabled=false by default and
+                    require operator acknowledgement + RBAC approval.
+    """
 
     __tablename__ = "device_capabilities"
     __table_args__ = (UniqueConstraint("device_id", "capability", name="uq_device_cap"),)
@@ -118,8 +151,10 @@ class DeviceCapability(Base, UUIDPkMixin, TimestampMixin):
         ForeignKey("devices.id", ondelete="CASCADE"), index=True
     )
     capability: Mapped[str] = mapped_column(String(80), nullable=False)
-    supported: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    implemented: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_destructive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -168,6 +203,11 @@ class DeviceCredential(Base, UUIDPkMixin, TimestampMixin):
     secret_ciphertext: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    verification_state: Mapped[str] = mapped_column(
+        String(20), default="NOT_VERIFIED", nullable=False
+    )
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class DeviceRawData(Base, UUIDPkMixin, TimestampMixin):

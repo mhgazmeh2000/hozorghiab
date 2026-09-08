@@ -26,7 +26,7 @@ from app.models.enums import (
     JobStatus,
 )
 from app.models.jobs import DiscoveryJob, DiscoveryResult
-from app.services.job_runner import submit
+from app.services import job_runner
 from app.services.settings_store import get_scan_params
 
 CAPABILITY_KEYS = [
@@ -147,7 +147,8 @@ async def get_job(db: AsyncSession, job_id: str) -> Optional[DiscoveryJob]:
 
 
 def start_job_in_background(job_id: str) -> None:
-    submit(job_id, lambda: execute_discovery_job(job_id))
+    """Dispatch a discovery job via the configured runner (builtin/celery)."""
+    job_runner.submit_discovery_job(job_id)
 
 
 async def execute_discovery_job(job_id: str) -> None:
@@ -307,12 +308,23 @@ async def persist_report(
     now = utcnow()
     reachable = bool(report.get("reachable"))
     device.last_seen_at = now
+    device.last_probe_at = now
     if reachable:
         device.last_online_at = now
-        device.status = DeviceStatus.ONLINE.value
+        # Port reachable; protocol upgrade happens below.
+        device.status = DeviceStatus.ONLINE_PROTOCOL_OPEN.value
+        device.last_probe_error = None
     else:
         device.last_offline_at = now
-        device.status = DeviceStatus.OFFLINE.value
+        # Only mark OFFLINE_VERIFIED for previously-verified devices.
+        if device.status in (
+            DeviceStatus.VERIFIED.value,
+            DeviceStatus.ONLINE_PROTOCOL_VERIFIED.value,
+        ):
+            device.status = DeviceStatus.OFFLINE_VERIFIED.value
+        else:
+            device.status = DeviceStatus.PROBE_UNREACHABLE.value
+        device.last_probe_error = "; ".join(report.get("errors") or [])[:500] or "probe unreachable"
     device.detection_state = state
     device.confidence = float(verdict.get("confidence", 0.0))
     device.detection_evidence = list(report.get("services", {}).values()) if report.get(
@@ -328,22 +340,26 @@ async def persist_report(
         device.protocol_name = "zk_tcp"
         device.adapter_name = "zkteco"
         device.is_attendance_candidate = True
-        device.detection_state = DetectionState.DETECTED.value
+        device.detection_state = DetectionState.PROTOCOL_VERIFIED.value
+        device.status = DeviceStatus.ONLINE_PROTOCOL_VERIFIED.value
         if info:
-            device.brand = info.get("brand")
+            # Vendor stays UNLESS OEMVendor explicitly reports it (Task 9)
+            if info.get("brand"):
+                device.brand = info.get("brand")
             device.model = info.get("model")
             device.serial_number = info.get("serial_number")
             device.firmware_version = info.get("firmware_version")
             device.platform = info.get("platform")
             device.device_name = info.get("device_name")
-            device.vendor = info.get("vendor")
+            if info.get("vendor"):
+                device.vendor = info.get("vendor")
             device.mac_address = info.get("mac_address")
             device.verified_at = now
-            device.detection_state = DetectionState.VERIFIED.value
-            device.confidence = max(device.confidence, 0.99)
+            device.detection_state = DetectionState.DEVICE_VERIFIED.value
+            device.confidence = max(device.confidence or 0, 0.99)
             device.status = DeviceStatus.VERIFIED.value
     elif info:
-        device.detection_state = DetectionState.DETECTED.value
+        device.detection_state = DetectionState.PROTOCOL_VERIFIED.value
 
     if report.get("errors"):
         device.last_error = "; ".join(report["errors"])[:2000]
@@ -362,19 +378,19 @@ async def persist_report(
         source = svc.get("source")
         if svc.get("zk_tcp"):
             protocol = "zk_tcp"
-            proto_state = DetectionState.VERIFIED.value
+            proto_state = DetectionState.PROTOCOL_VERIFIED.value
             conf = svc.get("confidence", 0.95)
         elif svc.get("http"):
             protocol = "http"
-            proto_state = DetectionState.DETECTED.value
+            proto_state = DetectionState.PORT_OPEN.value
             conf = 0.6
         elif svc.get("snmp"):
             protocol = "snmp"
-            proto_state = DetectionState.DETECTED.value
+            proto_state = DetectionState.PORT_OPEN.value
             conf = svc.get("confidence", 0.7)
         elif svc.get("banner"):
             protocol = "tcp"
-            proto_state = DetectionState.POSSIBLE.value
+            proto_state = DetectionState.PORT_OPEN.value
             conf = 0.2
         row = await db.scalar(
             select(DeviceProtocol).where(
@@ -462,7 +478,8 @@ async def _seed_capabilities(db: AsyncSession, device: Device) -> None:
     """(Re)seed capability matrix rows from adapter declarations.
 
     Only when the device has no capability rows yet; later scans must not
-    erase runtime verification flags.
+    erase runtime verification flags. Destructive capabilities default to
+    enabled=False and require explicit operator approval.
     """
     existing_count = await db.scalar(
         select(DeviceCapability.id)
@@ -487,17 +504,28 @@ async def _seed_capabilities(db: AsyncSession, device: Device) -> None:
         if row is None:
             row = DeviceCapability(device_id=device.id, capability=cap)
             db.add(row)
-        row.supported = bool(spec.get("supported", False))
+        implemented = bool(spec.get("supported", False))
+        destructive = cap in {
+            "create_users", "update_users", "delete_users", "delete_logs",
+            "clear_data", "set_time", "sync_users_to_device", "write_templates",
+        }
+        # Read-only safe operations start enabled as soon as they are verified;
+        # destructive operations stay disabled until an operator turns them on.
+        row.implemented = implemented
         row.source = spec.get("source")
         row.reason = spec.get("reason")
+        row.is_destructive = destructive
+        # verified stays False until a real op succeeds; enabled is set on
+        # first verification (see mark_capability_verified).
         row.verified = False
+        row.enabled = False
     await db.flush()
 
 
 async def mark_device_offline(db: AsyncSession, device_id: str) -> None:
     device = await db.get(Device, device_id)
     if device:
-        device.status = DeviceStatus.OFFLINE.value
+        device.status = DeviceStatus.OFFLINE_VERIFIED.value
         device.last_offline_at = utcnow()
         await db.commit()
 
@@ -505,6 +533,16 @@ async def mark_device_offline(db: AsyncSession, device_id: str) -> None:
 async def mark_capability_verified(
     db: AsyncSession, device_id: str, capability: str, supported: bool = True
 ) -> None:
+    """Record that a capability has been verified against a real device.
+
+    Non-destructive capabilities are auto-enabled on first verification;
+    destructive ones stay disabled until an operator flips the flag
+    (and the UI additionally requires confirmation + re-auth).
+    """
+    DESTRUCTIVE_CAPS = {
+        "create_users", "update_users", "delete_users", "delete_logs",
+        "clear_data", "set_time", "sync_users_to_device", "write_templates",
+    }
     row = await db.scalar(
         select(DeviceCapability).where(
             DeviceCapability.device_id == device_id,
@@ -512,12 +550,13 @@ async def mark_capability_verified(
         )
     )
     if row is None:
-        row = DeviceCapability(
-            device_id=device_id, capability=capability, supported=supported
-        )
+        row = DeviceCapability(device_id=device_id, capability=capability)
         db.add(row)
-    row.supported = supported
-    row.verified = True
+    row.implemented = supported
+    row.verified = supported
+    if supported and not row.is_destructive and capability not in DESTRUCTIVE_CAPS:
+        row.enabled = True
+    row.is_destructive = capability in DESTRUCTIVE_CAPS
     row.source = "verified on device"
     await db.flush()
 
@@ -525,7 +564,8 @@ async def mark_capability_verified(
 async def _mark_stale_devices(
     db: AsyncSession, scanned_ips: list[str], network_cidr: Optional[str]
 ) -> None:
-    """Devices inside the scanned range that did not answer become OFFLINE."""
+    """Devices inside the scanned range that didn't answer become PROBE_UNREACHABLE
+    (or OFFLINE_VERIFIED for previously-verified devices)."""
     if not network_cidr:
         return
     stale_since = utcnow() - timedelta(minutes=5)
@@ -540,5 +580,11 @@ async def _mark_stale_devices(
     ipset = set(scanned_ips)
     for d in devices:
         if d.ip_address in ipset:
-            d.status = DeviceStatus.OFFLINE.value
             d.last_offline_at = utcnow()
+            if d.status in (
+                DeviceStatus.VERIFIED.value,
+                DeviceStatus.ONLINE_PROTOCOL_VERIFIED.value,
+            ):
+                d.status = DeviceStatus.OFFLINE_VERIFIED.value
+            else:
+                d.status = DeviceStatus.PROBE_UNREACHABLE.value

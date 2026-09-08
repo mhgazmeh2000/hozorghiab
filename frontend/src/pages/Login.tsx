@@ -14,7 +14,7 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     try {
-      await login(username, password);
+      await login(username.trim(), password.trim());
       toast("خوش آمدید", "ok");
       nav("/");
     } catch (err) {
@@ -32,11 +32,25 @@ export default function Login() {
         <p className="muted">مدیریت و مانیتورینگ دستگاه‌های تردد شبکه‌ای</p>
         <label className="field">
           <span className="field-label">نام کاربری</span>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value.trim())}
+            autoFocus
+            required
+            autoComplete="username"
+            dir="ltr"
+          />
         </label>
         <label className="field">
           <span className="field-label">رمز عبور</span>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value.trim())}
+            required
+            autoComplete="current-password"
+            dir="ltr"
+          />
         </label>
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? <Spinner small /> : "ورود"}

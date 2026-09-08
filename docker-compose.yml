@@ -1,20 +1,25 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: attendance
-      POSTGRES_USER: attendance
-      POSTGRES_PASSWORD: attendance
+      POSTGRES_DB: ${POSTGRES_DB:-attendance}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U attendance -d attendance"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,10 +28,18 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-attendance}
+      REDIS_URL: redis://redis:6379/0
+      TASK_RUNNER: celery
+      RATE_LIMIT_BACKEND: redis
+      ENABLE_SCHEDULER: "false"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,15 +48,31 @@ services:
 
   worker:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
-    command: celery -A app.workers.celery_app worker --loglevel=INFO
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-attendance}
+      REDIS_URL: redis://redis:6379/0
+      TASK_RUNNER: celery
+      RATE_LIMIT_BACKEND: redis
+      ENABLE_SCHEDULER: "false"
+    command: celery -A app.workers.celery_app worker --loglevel=INFO --concurrency ${WORKER_CONCURRENCY:-4}
     depends_on:
       - backend
       - redis
 
   scheduler:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-attendance}
+      REDIS_URL: redis://redis:6379/0
+      TASK_RUNNER: celery
+      RATE_LIMIT_BACKEND: redis
+      ENABLE_SCHEDULER: "false"
     command: celery -A app.workers.celery_app beat --loglevel=INFO
     depends_on:
       - backend
@@ -51,10 +80,12 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
       - backend
 
 volumes:
   postgres_data:
+  redis_data:

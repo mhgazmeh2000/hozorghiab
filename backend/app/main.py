@@ -24,6 +24,13 @@ async def lifespan(app: FastAPI):
     from app.services import scheduler, seeder
     from app.services.settings_store import ensure_defaults
 
+    if settings.is_production and settings.enable_scheduler and settings.task_runner == "builtin":
+        logger.warning(
+            "Production environment should use task_runner=celery with a "
+            "dedicated beat container; the built-in scheduler is single-process "
+            "and will NOT run across replicas."
+        )
+
     sf = get_session_factory()
     async with sf() as db:
         if settings.database_url.startswith("sqlite"):
@@ -33,9 +40,17 @@ async def lifespan(app: FastAPI):
             await init_db()
         await ensure_defaults(db)
         await seeder.run_seeder(db)
+
+    # Only start the built-in scheduler when using the builtin runner. When
+    # task_runner=celery the beat container is responsible for scheduling.
     if settings.enable_scheduler and settings.task_runner == "builtin":
         scheduler.start_scheduler()
         logger.info("built-in scheduler started")
+    elif settings.task_runner == "celery":
+        logger.info(
+            "task_runner=celery; built-in scheduler is disabled (beat container drives scheduling)."
+        )
+
     yield
     scheduler.stop_scheduler()
 

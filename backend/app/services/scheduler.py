@@ -128,15 +128,23 @@ async def _mark_stale(db) -> None:
     devices = (
         await db.scalars(
             select(Device).where(
-                Device.status.notin_(["OFFLINE", "UNKNOWN"]),
+                Device.status.notin_([
+                    DeviceStatus.OFFLINE_VERIFIED.value,
+                    DeviceStatus.PROBE_UNREACHABLE.value,
+                    DeviceStatus.UNKNOWN.value,
+                    DeviceStatus.DISABLED.value,
+                ]),
                 Device.last_seen_at.is_not(None),
                 Device.last_seen_at < cutoff,
             )
         )
     ).all()
     for d in devices:
-        d.status = DeviceStatus.OFFLINE.value
         d.last_offline_at = utcnow()
+        if d.status == DeviceStatus.VERIFIED.value:
+            d.status = DeviceStatus.OFFLINE_VERIFIED.value
+        else:
+            d.status = DeviceStatus.PROBE_UNREACHABLE.value
     if devices:
         await db.commit()
 
