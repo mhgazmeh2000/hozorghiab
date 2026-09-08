@@ -1,0 +1,4 @@
+user_id,employee_code,name,card_number,department,enabled
+1001,EMP1001,علی رضایی,123456,IT,true
+1002,EMP1002,Sara Mohammadi,654321,HR,true
+1003,EMP1003,Duplicate User,1111,IT,false

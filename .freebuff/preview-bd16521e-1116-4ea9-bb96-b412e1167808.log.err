@@ -1,0 +1,84 @@
+INFO:     Started server process [5424]
+INFO:     Waiting for application startup.
+2026-09-08 12:03:14,530 INFO freebuff built-in scheduler started
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+2026-09-08 12:03:14,533 ERROR sqlalchemy.pool.impl.AsyncAdaptedQueuePool Exception terminating connection <AdaptedConnection <aiosqlite.core.Connection object at 0x0000018B0935ACF0>>
+Traceback (most recent call last):
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\uvicorn\server.py", line 173, in startup
+    server = await loop.create_server(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 1630, in create_server
+    raise OSError(err.errno, msg) from None
+OSError: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+    ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2050, in _run_once
+    handle._run()
+    ~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\uvicorn\server.py", line 81, in serve
+    await self._serve(sockets)
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\uvicorn\server.py", line 96, in _serve
+    await self.startup(sockets=sockets)
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\uvicorn\server.py", line 183, in startup
+    sys.exit(STARTUP_FAILURE)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^
+SystemExit: 3
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 373, in _close_connection
+    self._dialect.do_terminate(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\aiosqlite.py", line 510, in do_terminate
+    dbapi_connection.terminate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 402, in terminate
+    self.await_(asyncio.shield(self._terminate_graceful_close()))  # type: ignore[attr-defined] # noqa: E501
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+2026-09-08 12:03:14,667 ERROR sqlalchemy.pool.impl.AsyncAdaptedQueuePool Exception terminating connection <AdaptedConnection <aiosqlite.core.Connection object at 0x0000018B0935ACF0>>
+Traceback (most recent call last):
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 373, in _close_connection
+    self._dialect.do_terminate(connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\aiosqlite.py", line 510, in do_terminate
+    dbapi_connection.terminate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 398, in terminate
+    if in_greenlet():
+       ~~~~~~~~~~~^^
+  File "C:\Users\m.gazmeh\Desktop\hozorghiab\backend\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 105, in in_greenlet
+    current = getcurrent()
+RuntimeError: greenlet is being finalized
+2026-09-08 12:03:14,670 ERROR sqlalchemy.pool.impl.AsyncAdaptedQueuePool The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <aiosqlite.core.Connection object at 0x0000018B0935ACF0>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
+<sys>:0: SAWarning: The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <aiosqlite.core.Connection object at 0x0000018B0935ACF0>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
